@@ -37,3 +37,19 @@ Open the URL printed by Vite, normally http://localhost:5173.
 - `GET /api/stock/{symbol}/overview`
 
 **Disclaimer:** Educational research only, not personalized financial advice. Market data may be delayed, incomplete, or unavailable. No predictions or returns are guaranteed.
+
+
+## AI research assistant (local model)
+
+The AI assistant uses a LangGraph workflow and streams its response to the React UI using Server-Sent Events. It retrieves a small Yahoo Finance snapshot before answering. If the local model is unavailable, the endpoint falls back to a clearly labeled data snapshot.
+
+1. Install [Ollama](https://ollama.com/) and start the Ollama service.
+2. Pull a small local model, for example:
+   ```bash
+   ollama pull qwen2.5:3b
+   ```
+3. Install the backend requirements again: `pip install -r requirements.txt`.
+4. Optional environment variables: `OLLAMA_MODEL=qwen2.5:3b` and `OLLAMA_BASE_URL=http://localhost:11434`.
+5. Restart FastAPI. Check `GET /api/assistant/health` and use the Research assistant panel in the dashboard.
+
+Chat endpoint: `POST /api/assistant/chat` with JSON `{"symbol":"AAPL","question":"Summarize recent price action"}`; it returns an SSE stream. The local model runs on your own machine; no paid AI API key is required. For Docker or remote deployments, configure `OLLAMA_BASE_URL` to a reachable Ollama server.
