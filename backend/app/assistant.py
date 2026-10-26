@@ -140,24 +140,48 @@ async def assistant_chat(payload: AssistantRequest):
     symbol = payload.symbol.strip().upper()
     if not all(ch.isalnum() or ch in ".^=_-" for ch in symbol):
         raise HTTPException(status_code=422, detail="Invalid ticker symbol.")
+
     async def events() -> AsyncIterator[str]:
-        yield "event: status\ndata: " + json.dumps({"message": "Retrieving market context..."}) + "\n\n"
+        yield "event: status\\ndata: " + json.dumps({"message": "Retrieving market context..."}) + "\\n\\n"
+        emitted_model_tokens = False
+        full_answer = ""
         try:
-            result = await research_graph.ainvoke({
-                "question": payload.question.strip(),
-                "symbol": symbol
-            })
-            answer = result.get("answer", "No answer was produced.")
-            # Stream in small pieces for a progressive UI. The graph uses a real
-            # local model when available; its final answer is progressively delivered here.
-            step = 28
-            for i in range(0, len(answer), step):
-                yield "event: token\ndata: " + json.dumps({"text": answer[i:i + step]}) + "\n\n"
-                await asyncio.sleep(0.012)
-            yield "event: done\ndata: " + json.dumps({"ok": True, "symbol": symbol}) + "\n\n"
+            async for event in research_graph.astream_events(
+                {"question": payload.question.strip(), "symbol": symbol},
+                version="v2"
+            ):
+                if event.get("event") == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    text = getattr(chunk, "content", "")
+                    if isinstance(text, str) and text:
+                        emitted_model_tokens = True
+                        full_answer += text
+                        yield "event: token\\ndata: " + json.dumps({"text": text}) + "\\n\\n"
+                    elif isinstance(text, list):
+                        for part in text:
+                            piece = part.get("text", "") if isinstance(part, dict) else ""
+                            if piece:
+                                emitted_model_tokens = True
+                                full_answer += piece
+                                yield "event: token\\ndata: " + json.dumps({"text": piece}) + "\\n\\n"
+                elif event.get("event") == "on_chain_end" and event.get("name") == "LangGraph":
+                    pass
+            # If Ollama isn't available, the graph intentionally returns a useful
+            # snapshot fallback. Deliver that fallback progressively as SSE chunks.
+            if not emitted_model_tokens:
+                result = await research_graph.ainvoke({
+                    "question": payload.question.strip(),
+                    "symbol": symbol
+                })
+                answer = result.get("answer", "No answer was produced.")
+                for offset in range(0, len(answer), 28):
+                    yield "event: token\\ndata: " + json.dumps({"text": answer[offset:offset + 28]}) + "\\n\\n"
+                    await asyncio.sleep(0.01)
+            yield "event: done\\ndata: " + json.dumps({"ok": True, "symbol": symbol}) + "\\n\\n"
         except Exception as exc:
-            yield "event: error\ndata: " + json.dumps({"message": f"Assistant request failed: {type(exc).__name__}"}) + "\n\n"
-        yield "event: close\ndata: {}\n\n"
+            yield "event: error\\ndata: " + json.dumps({"message": f"Assistant request failed: {type(exc).__name__}"}) + "\\n\\n"
+        yield "event: close\\ndata: {}\\n\\n"
+
     return StreamingResponse(events(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"
     })
