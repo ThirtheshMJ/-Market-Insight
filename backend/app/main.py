@@ -3,9 +3,12 @@ import re
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import yfinance as yf
+from app.assistant import router as assistant_router
 
 app = FastAPI(title="Market Insight API", version="0.1.0",
               description="Market data API for the Market Insight research platform.")
+app.include_router(assistant_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
